@@ -11,79 +11,7 @@
  */
 
 #include "mbed.h"
-
-// CAN base address and offsets (Tritium)
-#define DC_BASE     0x220   // Driver controls base address- reading da
-#define MC_BASE     0x240   // Motor controls base address
-// Control Command offsets
-#define DC_DRIVE    0x01    // Offset for motor drive command
-#define DC_POWER    0x02    // Offset for motor power command
-#define DC_RESET    0x03    // Offset for reset command
-#define DC_SWITCH   0x04    // Offset for phase current measurement
-// Receive Data Commands offsets
-#define MC_ID       0x00    // Device identifier message
-#define MC_STATUS   0x01    // Status of motor (see WavesSculptor Communications Protocol TRI50.008 v5) 
-#define MC_VEL      0x03    // Velocity measurement offset
-// Commands
-#define CMD_DRIVE   (DC_BASE + DC DRIVE)
-#define CMD_POWER   (DC_BASE + DC_POWER)
-#define CMD_RESET   (DC_BASE + DC_RESET)
-#define CMD_VEL     (MC_BASE + MC_VEL)
-
-// Other IDs
-#define MAX_VELOCITY    100 // motor velocity in m/s
-#define MAX_CURRENT     1.0  // desired motor current as percentage of max current
-
-#define DC_BUS_CURRENT  0x900
-#define DC_BUS_VOLTAGE  0x901
-#define PHASE_B_CURRENT 0x902
-#define PHASE_C_CURRENT 0x903
-#define VEHICLE_VELOCITY 0x904
-#define MOTOR_VELOCITY  0x905
-#define VD 0x906
-#define VQ 0x907
-#define ID 0x908
-#define IQ 0x909
-#define BEMFD 0x90A
-#define BEMFQ 0x90B
-#define HEAT_SINK_TEMPERATURE 0x90C
-#define MOTOR_TEMPERATURE 0x90D
-#define DC_BUS_AMP_HOURS 0x90E
-#define ODOMETER 0x90F
-
-#define DASHBOARD  0x584      // Dashboard ID
-
-// Error IDs
-#define ERR_CAN_READ        0x1
-#define ERR_CAN_WRITE_DASH  0x2
-#define ERR_CAN_WRITE_MC    0x3
-
-// parsing data to and from motor controller
-#define High32bits(x) ((x) & 0xFFFF_FFFF_0000_0000)
-#define Low32bits(x)  ((x) & 0x0000_0000_FFFF_FFFF)
-
-// Message format received from dashboard
-struct __attribute__((packed)) Message {
-    uint8_t regenPercentage : 8;
-    uint8_t : 6;
-    bool enable : 1;
-    bool set : 1;
-};
-// Message format sent to motor controller
-struct __attribute__((packed)) MotorMessage {
-    float highFloat : 32;
-    float lowFloat : 32;
-};
-
-// error message that halts the operation of the motor controller.
-struct Error {
-    int errorID;            // error ID - see defines
-    union data {            // value to be sent
-        float vehicleVel;           // can be either the vehicle velocity (sendDashboard)
-        MotorMessage driveCommand;  // motor current and motor velocity (sendMotorController)
-        unsigned int canID;         // or CAN ID (readDashboard, readMotorController)
-    };
-};
+#include "main.h"
 
 // TODO: determine whether these are necessary
 // Serial pc(USBTX, USBRX);
@@ -119,15 +47,6 @@ float motorCurrent = 0;
 float motorVelocity = 0;
 float accelPot = 0;
 Error errorFlag = (Error) {.errorID = 0, .data = 0};
-
-// TODO: profile acceleration pedal potentiometer.
-#define ACCEL_FLOOR     .5   // minimum proportion value for acceleration pedal to be considered engaged.
-#define MAX_VELOCITY    100 // unobtainable velocity (in m/s) to enable torque control mode.
-#define MAX_CURRENT     100 // 100% maximum acceleration force
-#define REGEN_PERCENTAGE = 125;       // TODO: determine this
-#define RATE_DRIVE_COMMAND = 0.100;   // the rate that sendMotorController() is sending updates to the Tritium
-#define RATE_SEND_VEL = 0.100;        // the rate that sendDashboard() is sending CAN messages to dashboard
-
 
 int main () {
     //startup sequence - initialize threads/interrupts
@@ -212,8 +131,7 @@ int main () {
                 break;
             default:
                 printf("Invalid state: %i\n", currState);
-                state = DRIVE;
-                // TODO: add watchdog - start counting messages - if x messages are missed, just start emergency protocols
+                errorFlag = (Error) {.errorID = ERR_BAD_STATE, .data = currState};
         }
 
         // reset target velocity when out of cruise set mode.
@@ -233,6 +151,9 @@ int main () {
             break;
         case ERR_CAN_WRITE_MC:
             printf("Failed to write to motor controller the DRIVE COMMAND: %x\n", errorFlag.data);
+            break;
+        case ERR_BAD_STATE:
+            print("Switch statement progressed to a bad state: %x\n", errorFlag.data);
             break;
         default:
             printf("Undefined error: %i\n", errorFlag.errorID);
@@ -274,9 +195,10 @@ int updateState() {
 
 /**
  * readDashboard attempts to read the following from the dashboard
- *      packed char in the form of 00000|Regen|Enable|Set
+ *      see Message struct
  */
 void readDashboard() {
+    // TODO: add watchdog - start counting messages - if x messages are missed, just start emergency protocols
     while(1) {
         CANMessage msg;
         if(canCAR.read(msg)) {
@@ -295,7 +217,7 @@ void readDashboard() {
  *      (float) vehicle velocity
  */
 void sendDashboard() {
-    if(!canCAR.write(CANMessage(MC_BASE + MC_VEL, vehicleVel))) {
+    if(!canCAR.write(CANMessage(CMD_VEL, vehicleVel))) {
         errorFlag = (Error) {.errorID = ERR_CAN_WRITE_DASH, .data = vehicleVel};
     }
 }
