@@ -4,7 +4,7 @@
  *              William Blount
  *              Ethan xxx
  *              Chase Block
- * @last_modified: 2/22/20
+ * @last_modified: 2/29/20
  * @description:
  *      Motor Control Board Program. This program operates the tritium controllers,
  *      as well as manage data over CAN with Dashboard.
@@ -24,6 +24,14 @@
 // DigitalOut LED2a(PC_0);
 // DigitalOut LED1a(PA_3);
 
+// function definitions
+void readDashboard();
+void sendDashboard();
+void readMotorController();
+void sendMotorController();
+int updateState();
+
+// Object instances
 CAN canCar(PD_0, PD_1, 125000); // canCAR is car CAN  (Rx, Tx, speed)
 CAN canMC(PB_5, PB_6, 100000);  // canMC is Tritium Motor Controller CAN  (Rx, Tx, speed)
 AnalogIn ain(PB_0);
@@ -46,7 +54,10 @@ float busCurrent = 0;
 float motorCurrent = 0;
 float motorVelocity = 0;
 float accelPot = 0;
-Error errorFlag = (Error) {.errorID = 0, .data = 0};
+Error errorFlag = (Error) {
+    .errorID = 0,
+    .canID = 0
+};
 
 int main () {
     //startup sequence - initialize threads/interrupts
@@ -68,7 +79,10 @@ int main () {
     int targetVel = 0;
 
     // set error flag to 0 (nominal), by default.
-    errorFlag = (Error) {.errorID = 0, .data = 0};
+    errorFlag = (Error) {
+        .errorID = 0,
+        .canID = 0    
+    };
 
     // acceleration pedal defaults as not pushed
     accelPot = 0;
@@ -76,9 +90,9 @@ int main () {
     // set default drive state
     currState = futureState = DRIVE;
 
-    while(errMsg->errorID != 0) { // until program receives an error
+    while(errorFlag.errorID != 0) { // until program receives an error
         // read accelPot
-        accelPot = ain.read()   // note that the range is [0.0,1.0]
+        accelPot = ain.read();   // note that the range is [0.0,1.0]
         /**
          * Function Table
          * MODE             | ACCEL     | FUNCTION
@@ -131,7 +145,7 @@ int main () {
                 break;
             default:
                 printf("Invalid state: %i\n", currState);
-                errorFlag = (Error) {.errorID = ERR_BAD_STATE, .data = currState};
+                errorFlag = (Error) {.errorID = ERR_BAD_STATE, .invState = currState};
         }
 
         // reset target velocity when out of cruise set mode.
@@ -144,16 +158,19 @@ int main () {
      
     switch (errorFlag.errorID) {
         case ERR_CAN_READ:
-            printf("Invalid message id: %x\n", errorFlag.data);
+            printf("Invalid message id: %x\n", errorFlag.canID);
             break;
         case ERR_CAN_WRITE_DASH:
-            printf("Failed to write to dashboard the vehicle speed: %f\n", errorFlag.data);
+            printf("Failed to write to dashboard the vehicle speed: %f\n", errorFlag.vehicleVel);
             break;
         case ERR_CAN_WRITE_MC:
-            printf("Failed to write to motor controller the DRIVE COMMAND: %x\n", errorFlag.data);
+            printf("Failed to write to motor controller the DRIVE COMMAND: %x\n", errorFlag.driveCommand);
             break;
         case ERR_BAD_STATE:
-            print("Switch statement progressed to a bad state: %x\n", errorFlag.data);
+            printf("Switch statement progressed to a bad state: %x\n", errorFlag.invState);
+            break;
+        case ERR_BUFF_OVERFLOW:
+            printf("Send methods encountered a buffer overflow: %f\n", errorFlag.vehicleVel);
             break;
         default:
             printf("Undefined error: %i\n", errorFlag.errorID);
@@ -201,12 +218,12 @@ void readDashboard() {
     // TODO: add watchdog - start counting messages - if x messages are missed, just start emergency protocols
     while(1) {
         CANMessage msg;
-        if(canCAR.read(msg)) {
+        if(canCar.read(msg)) {
             if(msg.id == DASHBOARD) {
                 // getting a packed struct - see Message struct
                 data = (Message *) msg.data;
             }else {
-                errorFlag = (Error) {.errorID = ERR_CAN_READ, .data = msg.id};
+                errorFlag = (Error) {.errorID = ERR_CAN_READ, .canID = msg.id};
             }
         }
     }
@@ -217,8 +234,15 @@ void readDashboard() {
  *      (float) vehicle velocity
  */
 void sendDashboard() {
-    if(!canCAR.write(CANMessage(CMD_VEL, vehicleVel))) {
-        errorFlag = (Error) {.errorID = ERR_CAN_WRITE_DASH, .data = vehicleVel};
+    // convert float to bytes
+    char buffer[4];
+    int ret = snprintf(buffer, sizeof buffer, "%f", vehicleVel);
+    if(ret < 0) {
+        errorFlag = (Error) {.errorID = ERR_CAN_WRITE_DASH, .vehicleVel = vehicleVel};    
+    }else {
+        if(!canCar.write(CANMessage(CMD_VEL, buffer, 4))) {
+            errorFlag = (Error) {.errorID = ERR_BUFF_OVERFLOW, .vehicleVel = vehicleVel};
+        }    
     }
 }
 
@@ -231,9 +255,15 @@ void readMotorController() {
         CANMessage msg;
         if(canMC.read(msg)) {
             if(msg.id == (CMD_VEL)) {                       // grabbing vehicle velocity determined by motor controller
-                vehicleVel = High32bits(msg.data) >> 32;    // vehicle velocity is higher 32 bits - shift right to grab it
+                // grab only the upper 32 bits of the msg - vehicle velocity
+                char data[4];
+                data[0] = msg.data[7];
+                data[1] = msg.data[6];
+                data[2] = msg.data[5];
+                data[3] = msg.data[4]; 
+                vehicleVel = *(float*)&data;
             }else {
-                errorFlag = (Error) {.errorID = ERR_CAN_READ, .data = msg.id};
+                errorFlag = (Error) {.errorID = ERR_CAN_READ, .canID= msg.id};
             }
         }
     }
@@ -246,8 +276,13 @@ void readMotorController() {
  *      Consider the failure rate of the message: if the message is sent 10 times every 250ms, the message must fail to be sent 9 times before the controller halts the motor. 
  */
 void sendMotorController() {
-    MotorMessage msg = (Low32bits(motorCurrent) << 32) + Low32bits(motorVelocity);
-    if(!canMC.write(CANMessage(CMD_DRIVE), msg)) {
-        errorFlag = (Error) {.errorID = ERR_CAN_WRITE_MC, .data = msg};
+    // convert floats to MotorMessage
+    uint32_t motorCurrBits = *((uint32_t*)&motorCurrent);
+    uint32_t motorVelBits = *((uint32_t*)&motorVelocity);
+    MotorMessage mtrMsg = {motorCurrBits, motorVelBits};
+    // convert MotorMessage to char*
+    CANMessage canMsg = CANMessage(CMD_DRIVE, (char*)&mtrMsg);
+    if(!canMC.write(canMsg)) {
+        errorFlag = (Error) {.errorID = ERR_CAN_WRITE_MC, .driveCommand = mtrMsg};
     }
 }

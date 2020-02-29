@@ -14,15 +14,12 @@
     #define MC_STATUS   0x01    // Status of motor (see WavesSculptor Communications Protocol TRI50.008 v5) 
     #define MC_VEL      0x03    // Velocity measurement offset
     // Commands
-    #define CMD_DRIVE   (DC_BASE + DC DRIVE)
+    #define CMD_DRIVE   (DC_BASE + DC_DRIVE)
     #define CMD_POWER   (DC_BASE + DC_POWER)
     #define CMD_RESET   (DC_BASE + DC_RESET)
     #define CMD_VEL     (MC_BASE + MC_VEL)
 
     // Other IDs
-    #define MAX_VELOCITY    100 // motor velocity in m/s
-    #define MAX_CURRENT     1.0  // desired motor current as percentage of max current
-
     #define DC_BUS_CURRENT  0x900
     #define DC_BUS_VOLTAGE  0x901
     #define PHASE_B_CURRENT 0x902
@@ -47,18 +44,19 @@
     #define ERR_CAN_WRITE_DASH  0x2
     #define ERR_CAN_WRITE_MC    0x3
     #define ERR_BAD_STATE       0x4
+    #define ERR_BUFF_OVERFLOW   0x5
 
     // parsing data to and from motor controller
-    #define High32bits(x) ((x) & 0xFFFF_FFFF_0000_0000)
-    #define Low32bits(x)  ((x) & 0x0000_0000_FFFF_FFFF)
+    #define High32bits(x) ((x) & 0xFFFFFFFF00000000)
+    #define Low32bits(x)  ((x) & 0x00000000FFFFFFFF)
 
     // TODO: profile acceleration pedal potentiometer.
     #define ACCEL_FLOOR     .5   // minimum proportion value for acceleration pedal to be considered engaged.
     #define MAX_VELOCITY    100 // unobtainable velocity (in m/s) to enable torque control mode.
     #define MAX_CURRENT     100 // 100% maximum acceleration force
-    #define REGEN_PERCENTAGE = 125;       // TODO: determine this
-    #define RATE_DRIVE_COMMAND = 0.100;   // the rate that sendMotorController() is sending updates to the Tritium
-    #define RATE_SEND_VEL = 0.100;        // the rate that sendDashboard() is sending CAN messages to dashboard
+    #define REGEN_PERCENTAGE    125       // TODO: determine this
+    #define RATE_DRIVE_COMMAND  0.100   // the rate that sendMotorController() is sending updates to the Tritium
+    #define RATE_SEND_VEL       0.100        // the rate that sendDashboard() is sending CAN messages to dashboard
 
     // Message format received from dashboard
     struct __attribute__((packed)) Message {
@@ -70,17 +68,18 @@
 
     // Message format sent to motor controller
     struct __attribute__((packed)) MotorMessage {
-        motorCurrent : 32;  // floats as defined for the tritiums
-        motorVelocity : 32;
+        uint32_t motorCurrent : 32;  // floats as defined for the tritiums
+        uint32_t motorVelocity : 32;
     };
 
     // error message that halts the operation of the motor controller.
     struct Error {
         int errorID;            // error ID - see defines
-        union data {            // value to be sent
+        union {            // value to be sent
             float vehicleVel;           // can be either the vehicle velocity (sendDashboard)
             MotorMessage driveCommand;  // motor current and motor velocity (sendMotorController)
             unsigned int canID;         // or CAN ID (readDashboard, readMotorController)
+            int invState;      // or state that the motor control fell into
         };
     };
 
