@@ -20,24 +20,26 @@
     #define CMD_VEL     (MC_BASE + MC_VEL)
 
     // Other IDs
-    #define DC_BUS_CURRENT  0x900
-    #define DC_BUS_VOLTAGE  0x901
-    #define PHASE_B_CURRENT 0x902
-    #define PHASE_C_CURRENT 0x903
-    #define VEHICLE_VELOCITY 0x904
-    #define MOTOR_VELOCITY  0x905
-    #define VD 0x906
-    #define VQ 0x907
-    #define ID 0x908
-    #define IQ 0x909
-    #define BEMFD 0x90A
-    #define BEMFQ 0x90B
-    #define HEAT_SINK_TEMPERATURE 0x90C
-    #define MOTOR_TEMPERATURE 0x90D
-    #define DC_BUS_AMP_HOURS 0x90E
-    #define ODOMETER 0x90F
+    // #define DC_BUS_CURRENT  0x900
+    // #define DC_BUS_VOLTAGE  0x901
+    // #define PHASE_B_CURRENT 0x902
+    // #define PHASE_C_CURRENT 0x903
+    // #define VEHICLE_VELOCITY 0x904
+    // #define MOTOR_VELOCITY  0x905
+    // #define VD 0x906
+    // #define VQ 0x907
+    // #define ID 0x908
+    // #define IQ 0x909
+    // #define BEMFD 0x90A
+    // #define BEMFQ 0x90B
+    // #define HEAT_SINK_TEMPERATURE 0x90C
+    // #define MOTOR_TEMPERATURE 0x90D
+    // #define DC_BUS_AMP_HOURS 0x90E
+    // #define ODOMETER 0x90F
 
-    #define DASHBOARD  0x584      // Dashboard ID
+    #define DASHBOARD   0x584      // Dashboard ID
+    #define BPS         0x100      // BPS ID
+    #define MOTOR_DISABLE (BPS + 0xA)
 
     // Error IDs
     #define ERR_CAN_READ        0x1
@@ -55,7 +57,7 @@
     #define MAX_VELOCITY    100 // unobtainable velocity (in m/s) to enable torque control mode.
     #define MAX_CURRENT     100 // 100% maximum acceleration force
     #define REGEN_PERCENTAGE    125       // TODO: determine this
-    #define RATE_DRIVE_COMMAND  0.100   // the rate that sendMotorController() is sending updates to the Tritium
+    #define RATE_DRIVE_COMMAND  0.010   // the rate that sendMotorController() is sending updates to the Tritium
     #define RATE_SEND_VEL       0.100        // the rate that sendDashboard() is sending CAN messages to dashboard
 
     // Message format received from dashboard
